@@ -2,3 +2,13 @@
 numpy>=1.26.0
 opencv-python>=4.8.0
 pillow>=10.0.0
+
+# Deep Learning & Object Tracking
+torch>=2.0.0
+torchvision>=0.15.0
+ultralytics>=8.0.0
+
+# Data Validation & Networking
+pydantic>=2.0.0
+httpx>=0.25.0
+python-dotenv>=1.0.0
