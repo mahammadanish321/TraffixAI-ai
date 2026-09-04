@@ -113,5 +113,5 @@ def run_vehicle_detection(video_path: str, model_name: str = "yolov8n.pt", conf_
     print(f"[SUCCESS] Finished detection test. Average FPS: {total_fps:.1f}")
 
 if __name__ == "__main__":
-    sample_video = "data/videos/sample_traffic.mp4"
-    run_vehicle_detection(sample_video)
+    from config.settings import settings
+    run_vehicle_detection(settings.VIDEO_SOURCE)

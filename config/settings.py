@@ -18,10 +18,12 @@ class Settings:
     
     # YOLO & Tracking Settings
     YOLO_MODEL: str = os.getenv("YOLO_MODEL", "yolov8n.pt")
-    CONF_THRESHOLD: float = float(os.getenv("CONF_THRESHOLD", "0.35"))
-    TRACKER_CONFIG: str = os.getenv("TRACKER_CONFIG", "bytetrack.yaml")
-    MIN_HITS_TO_CONFIRM: int = int(os.getenv("MIN_HITS_TO_CONFIRM", "3"))
+    CONF_THRESHOLD: float = float(os.getenv("CONF_THRESHOLD", "0.20"))
+    TRACKER_CONFIG: str = os.getenv("TRACKER_CONFIG", "config/tracker.yaml")
+    MIN_HITS_TO_CONFIRM: int = int(os.getenv("MIN_HITS_TO_CONFIRM", "4"))
     MIN_BOX_AREA: int = int(os.getenv("MIN_BOX_AREA", "625"))  # 25x25 pixels
+    MAX_LOST_FRAMES: int = int(os.getenv("MAX_LOST_FRAMES", "20"))  # Tolerance for temporary occlusion before ENDED
+
     
     # Backend API Endpoints (Person 3)
     BACKEND_URL: str = os.getenv("BACKEND_URL", "http://localhost:8000")

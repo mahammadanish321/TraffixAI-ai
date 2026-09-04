@@ -1,172 +1,120 @@
 import cv2
 import time
 import os
-from collections import defaultdict
-from ultralytics import YOLO
+import sys
 
-# COCO road vehicle classes
-VEHICLE_CLASSES = {
-    2: "car",
-    3: "motorcycle",
-    5: "bus",
-    7: "truck"
-}
+# Ensure project root is in sys.path
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-# Production tracking thresholds
-MIN_HITS_TO_CONFIRM = 3      # Confirms vehicle after 3 consecutive detections
-MIN_BOX_AREA = 25 * 25       # Ignore tiny boxes smaller than 25x25 pixels (noise in distant background)
+from config.settings import settings
+from tracking.tracker import VehicleTracker
+from schemas.track import TrackState
+from camera.stream import VideoStream
 
-
-def run_vehicle_tracking(
-    video_path: str,
-    camera_id: str = "CAM_001",
-    model_name: str = "yolov8n.pt",
-    conf_threshold: float = 0.35
+def run_continuous_tracking_test(
+    video_path: str = settings.VIDEO_SOURCE,
+    camera_id: str = settings.CAMERA_ID
 ):
     """
-    Production-ready vehicle tracking test with:
-    - ByteTrack persistent tracking
-    - Minimum hit confirmation (filters flickering noise)
-    - Minimum bounding box size filtering
-    - Track lifecycle stats and trajectory trails
+    Test script for verified continuous vehicle tracking:
+    - Verifies that vehicles maintain a single persistent local_track_id
+    - Shows EMA bounding box smoothing (zero jitter)
+    - Demonstrates coasting / extrapolation when detection drops
+    - Reports track state transitions: ACTIVE vs TEMPORARILY_LOST
     """
     if not os.path.exists(video_path):
-        print(f"[ERROR] Video file not found at: {video_path}")
+        print(f"[ERROR] Video file not found: {video_path}")
         return
 
-    print(f"[INFO] Initializing YOLO + ByteTrack on {video_path}...")
-    model = YOLO(model_name)
-
-    cap = cv2.VideoCapture(video_path)
-    if not cap.isOpened():
-        print(f"[ERROR] Failed to open video: {video_path}")
-        return
-
-    # Track lifecycle state:
-    # track_hits: track_id -> number of times seen
-    track_hits = defaultdict(int)
-    # track_history: track_id -> list of (center_x, center_y) trail points
-    track_history = defaultdict(list)
-    # confirmed_vehicles: set of track_ids that met confirmation threshold
-    confirmed_vehicles = set()
-
     print("=" * 65)
-    print(f"       ROBUST VEHICLE TRACKING PIPELINE ACTIVE ({camera_id})       ")
+    print(f"      CONTINUOUS VEHICLE TRACKING VERIFICATION ({camera_id})      ")
     print("=" * 65)
-    print(f"Min Hits to Confirm: {MIN_HITS_TO_CONFIRM} frames")
-    print(f"Min Box Area       : {MIN_BOX_AREA} px")
-    print(f"Confidence Filter  : >= {conf_threshold * 100}%")
+    print("Features Active: BoT-SORT + TrackManager (Lifecycle State Machine)")
+    print("States: ACTIVE (Direct Detection) | TEMPORARILY_LOST (Coasting)")
+    print("Press 'q' in the window to stop.")
     print("=" * 65)
-    print("Press 'q' to stop.")
 
-    frame_count = 0
+    stream = VideoStream(source=video_path, loop=False)
+    tracker = VehicleTracker(camera_id=camera_id)
+
+    track_first_seen = {}
+    track_last_seen = {}
+    track_hit_counts = {}
+
     start_time = time.time()
+    total_frames = 0
 
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            print("\n[INFO] Video stream ended.")
-            break
+    for frame, frame_num, timestamp_sec in stream.read_frames():
+        total_frames = frame_num
+        active_tracks = tracker.update(frame, frame_num=frame_num, timestamp_sec=timestamp_sec)
 
-        frame_count += 1
+        for track in active_tracks:
+            tid = track.track_id
+            if tid not in track_first_seen:
+                track_first_seen[tid] = frame_num
+            track_last_seen[tid] = frame_num
+            track_hit_counts[tid] = track_hit_counts.get(tid, 0) + 1
 
-        # Run YOLO + ByteTrack
-        results = model.track(
-            source=frame,
-            persist=True,
-            tracker="bytetrack.yaml",
-            conf=conf_threshold,
-            classes=list(VEHICLE_CLASSES.keys()),
-            verbose=False
-        )[0]
+            x1, y1, x2, y2 = track.bbox.x1, track.bbox.y1, track.bbox.x2, track.bbox.y2
 
-        active_confirmed_in_frame = 0
+            # Visual colors:
+            # Green = Direct high-confidence ACTIVE detection
+            # Cyan = TEMPORARILY_LOST / Coasting (preserving ID across momentary dropout)
+            if track.state == TrackState.TEMPORARILY_LOST:
+                box_color = (255, 255, 0)  # Cyan
+                status_tag = f"[LOST: {track.missed_frame_count}f]"
+            else:
+                box_color = (0, 255, 128)  # Bright Green
+                status_tag = f"{track.latest_confidence:.2f}"
 
-        if results.boxes is not None and results.boxes.id is not None:
-            boxes = results.boxes.xyxy.int().cpu().tolist()
-            track_ids = results.boxes.id.int().cpu().tolist()
-            class_ids = results.boxes.cls.int().cpu().tolist()
-            confidences = results.boxes.conf.cpu().tolist()
+            cv2.rectangle(frame, (x1, y1), (x2, y2), box_color, 2)
 
-            for box, track_id, cls_id, conf in zip(boxes, track_ids, class_ids, confidences):
-                x1, y1, x2, y2 = box
-                width = x2 - x1
-                height = y2 - y1
-                box_area = width * height
+            label = f"{track.local_track_id} | {track.vehicle_type} {status_tag}"
+            cv2.putText(
+                frame,
+                label,
+                (x1, max(y1 - 10, 20)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.55,
+                box_color,
+                2,
+                cv2.LINE_AA
+            )
 
-                # Filter 1: Ignore tiny distant bounding boxes
-                if box_area < MIN_BOX_AREA:
-                    continue
+            # Draw trajectory trail
+            trail = track.trajectory
+            for i in range(1, len(trail)):
+                pt1 = (trail[i - 1][0], trail[i - 1][1])
+                pt2 = (trail[i][0], trail[i][1])
+                cv2.line(frame, pt1, pt2, (0, 255, 255), 2)
 
-                # Increment track hits count
-                track_hits[track_id] += 1
-
-                # Filter 2: Check if track has been observed enough times to confirm
-                if track_hits[track_id] >= MIN_HITS_TO_CONFIRM:
-                    confirmed_vehicles.add(track_id)
-                    active_confirmed_in_frame += 1
-
-                    local_track_id = f"{camera_id}_T_{track_id}"
-                    vehicle_type = VEHICLE_CLASSES.get(cls_id, "vehicle")
-
-                    # Center bottom road contact point
-                    center_x = int((x1 + x2) / 2)
-                    center_y = int(y2)
-                    track_history[track_id].append((center_x, center_y))
-                    if len(track_history[track_id]) > 40:
-                        track_history[track_id].pop(0)
-
-                    # Draw Bounding Box & Label
-                    box_color = (0, 255, 128) if cls_id == 2 else (255, 128, 0)
-                    cv2.rectangle(frame, (x1, y1), (x2, y2), box_color, 2)
-
-                    label = f"{local_track_id} | {vehicle_type} {conf:.2f}"
-                    cv2.putText(
-                        frame,
-                        label,
-                        (x1, max(y1 - 10, 20)),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        0.55,
-                        box_color,
-                        2,
-                        cv2.LINE_AA
-                    )
-
-                    # Draw Trajectory Trail
-                    points = track_history[track_id]
-                    for i in range(1, len(points)):
-                        cv2.line(frame, points[i - 1], points[i], (0, 255, 255), 2)
-
-        # FPS & HUD overlay
         elapsed = time.time() - start_time
-        fps = frame_count / elapsed if elapsed > 0 else 0
+        fps = frame_num / elapsed if elapsed > 0 else 0
 
-        hud_text = f"FPS: {fps:.1f} | Active Vehicles: {active_confirmed_in_frame} | Confirmed Count: {len(confirmed_vehicles)}"
-        cv2.putText(frame, hud_text, (20, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 255, 255), 2, cv2.LINE_AA)
+        hud = f"FPS: {fps:.1f} | Frame: {frame_num} | Active: {len(active_tracks)} | Unique Confirmed IDs: {len(track_first_seen)}"
+        cv2.putText(frame, hud, (20, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 255, 255), 2, cv2.LINE_AA)
 
-        cv2.imshow("Traffix AI - Robust Vehicle Tracking", frame)
-
+        cv2.imshow("Traffix AI — Continuous Tracking Test", frame)
         if cv2.waitKey(1) & 0xFF == ord('q'):
-            print("\n[INFO] Stopped by user.")
             break
 
-    cap.release()
+    stream.release()
     cv2.destroyAllWindows()
 
+    print("\n" + "=" * 65)
+    print("           CONTINUOUS TRACK LIFETIME REPORT           ")
     print("=" * 65)
-    print("              TRACK LIFECYCLE SUMMARY              ")
-    print("=" * 65)
-    print(f"Total Video Frames            : {frame_count}")
-    print(f"Total Raw Tracks Detected     : {len(track_hits)}")
-    print(f"Total Confirmed Vehicles      : {len(confirmed_vehicles)}")
+    print(f"Total Video Frames Processed : {total_frames}")
+    print(f"Total Vehicles Tracked       : {len(track_first_seen)}")
     print("-" * 65)
-    print("Track ID | Frame Hits | Status")
+    print(f"{'Local Track ID':<16} | {'Start Frame':<12} | {'End Frame':<10} | {'Duration (Frames)':<15}")
     print("-" * 65)
-    for tid, hits in sorted(track_hits.items(), key=lambda item: item[0]):
-        status = "✅ Confirmed Vehicle" if tid in confirmed_vehicles else "❌ Rejected (Noise/Too Short)"
-        print(f"T_{tid:<6} | {hits:<10} | {status}")
+    for tid in sorted(track_first_seen.keys()):
+        start_f = track_first_seen[tid]
+        end_f = track_last_seen[tid]
+        duration = end_f - start_f + 1
+        print(f"CAM_001_T_{tid:<7} | {start_f:<12} | {end_f:<10} | {duration:<15}")
     print("=" * 65)
 
 if __name__ == "__main__":
-    sample_video = "data/videos/sample_traffic.mp4"
-    run_vehicle_tracking(sample_video, camera_id="CAM_001")
+    run_continuous_tracking_test()

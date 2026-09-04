@@ -20,6 +20,9 @@ class DetectionEvent(BaseModel):
     vehicle_confidence: float = Field(..., ge=0.0, le=1.0)
     bounding_box: BoundingBox
     frame_reference: Optional[str] = None
+    first_seen: Optional[str] = None
+    last_seen: Optional[str] = None
+
 
 class BatchDetectionEvents(BaseModel):
     """

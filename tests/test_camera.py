@@ -85,5 +85,5 @@ def test_video_stream(video_path: str):
     print(f"[SUCCESS] Processed {frame_count} frames in {elapsed_time:.2f}s at average {current_fps:.1f} FPS.")
 
 if __name__ == "__main__":
-    sample_video = "data/videos/sample_traffic.mp4"
-    test_video_stream(sample_video)
+    from config.settings import settings
+    test_video_stream(settings.VIDEO_SOURCE)
