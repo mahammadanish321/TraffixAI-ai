@@ -12,18 +12,20 @@ from camera.stream import VideoStream
 from tracking.tracker import VehicleTracker
 from schemas.track import TrackState
 from client.backend_client import BackendClient
+from identity import IdentityPipeline
 
 def run_ai_service():
     print("=" * 65)
     print(f"       TRAFFIX AI — AI SERVICE PIPELINE (CAMERA: {settings.CAMERA_ID})       ")
     print("=" * 65)
-    print("Architecture: YOLO (detect) -> BoT-SORT (track) -> TrackManager (lifecycle)")
+    print("Architecture: YOLO (detect) -> BoT-SORT (track) -> Identity (ANPR + ReID)")
     print("Track Lifecycle: NEW -> ACTIVE -> TEMPORARILY_LOST -> ENDED")
     print("=" * 65)
 
     # 1. Initialize Pipeline Modules
     stream = VideoStream(source=settings.VIDEO_SOURCE, loop=True)
-    tracker = VehicleTracker(camera_id=settings.CAMERA_ID)
+    identity_pipeline = IdentityPipeline()
+    tracker = VehicleTracker(camera_id=settings.CAMERA_ID, identity_pipeline=identity_pipeline)
     backend_client = BackendClient(base_url=settings.BACKEND_URL)
 
     last_heartbeat_time = 0.0
@@ -48,7 +50,9 @@ def run_ai_service():
                 success = backend_client.send_detection_event(event)
                 total_events_dispatched += 1
                 status_str = "Dispatched to Backend" if success else "Generated (Backend Offline)"
-                print(f"🚗 [CONSOLIDATED EVENT] {event.local_track_id} ({event.vehicle_type}, conf={event.vehicle_confidence:.2f}) -> {status_str}")
+                plate_display = f" | Plate: {event.plate_number}" if event.plate_number and not event.plate_number.startswith("UNREADABLE") else ""
+                emb_display = f" | Emb: {len(event.vehicle_embedding)}D" if event.vehicle_embedding else ""
+                print(f"🚗 [CONSOLIDATED EVENT] {event.local_track_id} ({event.vehicle_type}, conf={event.vehicle_confidence:.2f}{plate_display}{emb_display}) -> {status_str}")
 
             # 4. Render Visual Overlays on Frame
             for track in active_tracks:
@@ -66,7 +70,11 @@ def run_ai_service():
 
                 cv2.rectangle(frame, (x1, y1), (x2, y2), box_color, 2)
 
-                label = f"{track.local_track_id} | {track.vehicle_type} [{state_tag}]"
+                # Display Plate number when identified, otherwise vehicle type
+                if track.plate_number and not track.plate_number.startswith("UNREADABLE"):
+                    label = f"{track.local_track_id} | {track.plate_number} [{track.plate_confidence:.2f}]"
+                else:
+                    label = f"{track.local_track_id} | {track.vehicle_type} [{state_tag}]"
                 cv2.putText(frame, label, (x1, max(y1 - 8, 18)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, box_color, 2, cv2.LINE_AA)
 
                 # Draw motion trajectory trail
@@ -97,11 +105,13 @@ def run_ai_service():
             hud_text = f"CAM: {settings.CAMERA_ID} | FPS: {current_fps:.1f} | Active: {active_count} | Lost: {lost_count} | Events: {total_events_dispatched}"
             cv2.putText(frame, hud_text, (20, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 255, 255), 2, cv2.LINE_AA)
 
-            cv2.imshow("Traffix AI — Track Lifecycle Pipeline", frame)
-
-            if cv2.waitKey(1) & 0xFF == ord('q'):
-                print("\n[INFO] AI Service stopped by user.")
-                break
+            try:
+                cv2.imshow("Traffix AI — Track Lifecycle Pipeline", frame)
+                if cv2.waitKey(1) & 0xFF == ord('q'):
+                    print("\n[INFO] AI Service stopped by user.")
+                    break
+            except cv2.error:
+                pass
 
     finally:
         stream.release()

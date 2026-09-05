@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import List, Dict, Tuple, Optional
+from typing import List, Dict, Tuple, Optional, Any
 import numpy as np
 from ultralytics import YOLO
 from config.settings import settings
@@ -29,11 +29,13 @@ class VehicleTracker:
         min_hits: int = settings.MIN_HITS_TO_CONFIRM,
         max_lost_frames: int = settings.MAX_LOST_FRAMES,
         min_box_area: int = settings.MIN_BOX_AREA,
-        tracker_config: str = settings.TRACKER_CONFIG
+        tracker_config: str = settings.TRACKER_CONFIG,
+        identity_pipeline: Optional[Any] = None
     ):
         self.camera_id = camera_id
         self.conf_threshold = conf_threshold
         self.tracker_config = tracker_config
+        self.identity_pipeline = identity_pipeline
         
         print(f"[INFO] Initializing Vehicle Tracker ({tracker_config}) for camera: {camera_id}")
         self.model = YOLO(model_path)
@@ -43,7 +45,8 @@ class VehicleTracker:
             camera_id=camera_id,
             min_hits_to_confirm=min_hits,
             max_lost_frames=max_lost_frames,
-            min_box_area=min_box_area
+            min_box_area=min_box_area,
+            identity_pipeline=identity_pipeline
         )
 
     def update(

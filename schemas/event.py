@@ -1,5 +1,6 @@
 from typing import List, Optional
 from datetime import datetime, timezone
+import uuid
 from pydantic import BaseModel, Field
 from schemas.observation import BoundingBox
 
@@ -8,6 +9,7 @@ class DetectionEvent(BaseModel):
     Official API Contract for: POST /api/v1/events/detection
     Sent from AI Service to Backend (Person 3).
     """
+    event_id: str = Field(default_factory=lambda: f"evt_{uuid.uuid4().hex[:12]}")
     camera_id: str
     observed_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     local_track_id: str

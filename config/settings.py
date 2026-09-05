@@ -23,8 +23,12 @@ class Settings:
     MIN_HITS_TO_CONFIRM: int = int(os.getenv("MIN_HITS_TO_CONFIRM", "4"))
     MIN_BOX_AREA: int = int(os.getenv("MIN_BOX_AREA", "625"))  # 25x25 pixels
     MAX_LOST_FRAMES: int = int(os.getenv("MAX_LOST_FRAMES", "20"))  # Tolerance for temporary occlusion before ENDED
-
     
+    # Re-ID Model Settings (Person 2)
+    REID_MODEL_NAME: str = os.getenv("REID_MODEL_NAME", "mobilenet_v3_small")
+    REID_EMBEDDING_DIM: int = int(os.getenv("REID_EMBEDDING_DIM", "512"))
+    REID_SIMILARITY_THRESHOLD: float = float(os.getenv("REID_SIMILARITY_THRESHOLD", "0.75"))
+
     # Backend API Endpoints (Person 3)
     BACKEND_URL: str = os.getenv("BACKEND_URL", "http://localhost:8000")
     EVENT_ENDPOINT: str = "/api/v1/events/detection"

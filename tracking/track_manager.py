@@ -1,4 +1,4 @@
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Tuple, Optional, Any
 from datetime import datetime, timezone
 import numpy as np
 from config.settings import settings
@@ -25,13 +25,15 @@ class TrackManager:
         min_hits_to_confirm: int = settings.MIN_HITS_TO_CONFIRM,
         max_lost_frames: int = settings.MAX_LOST_FRAMES,
         min_box_area: int = settings.MIN_BOX_AREA,
-        ema_alpha: float = 0.75
+        ema_alpha: float = 0.75,
+        identity_pipeline: Optional[Any] = None
     ):
         self.camera_id = camera_id
         self.min_hits_to_confirm = min_hits_to_confirm
         self.max_lost_frames = max_lost_frames
         self.min_box_area = min_box_area
         self.ema_alpha = ema_alpha
+        self.identity_pipeline = identity_pipeline
 
         # In-memory track registry: track_id -> TrackRecord
         self.tracks: Dict[int, TrackRecord] = {}
@@ -198,21 +200,29 @@ class TrackManager:
 
     def _enqueue_event(self, record: TrackRecord):
         """Builds and queues a consolidated DetectionEvent for a confirmed vehicle."""
-        event = DetectionEvent(
-            camera_id=record.camera_id,
-            observed_at=record.last_seen,
-            local_track_id=record.local_track_id,
-            vehicle_type=record.vehicle_type,
-            vehicle_confidence=record.peak_confidence,
-            bounding_box=record.bbox,
-            plate_number=record.plate_number or f"TEMP_{record.local_track_id}",
-            plate_confidence=record.plate_confidence or 0.90,
-            vehicle_embedding=record.vehicle_embedding or [0.012, -0.084, 0.221],
-            embedding_model="reid-model-v1",
-            embedding_version="1.0",
-            first_seen=record.first_seen,
-            last_seen=record.last_seen
-        )
+        if self.identity_pipeline is not None and record.best_crop is not None:
+            obs = self.to_observation(record)
+            event = self.identity_pipeline.enrich_observation(obs)
+            # Store identity data into track record for HUD visualization
+            record.plate_number = event.plate_number
+            record.plate_confidence = event.plate_confidence
+            record.vehicle_embedding = event.vehicle_embedding
+        else:
+            event = DetectionEvent(
+                camera_id=record.camera_id,
+                observed_at=record.last_seen,
+                local_track_id=record.local_track_id,
+                vehicle_type=record.vehicle_type,
+                vehicle_confidence=record.peak_confidence,
+                bounding_box=record.bbox,
+                plate_number=record.plate_number or f"UNREADABLE_{record.local_track_id}",
+                plate_confidence=record.plate_confidence or 0.0,
+                vehicle_embedding=record.vehicle_embedding or [],
+                embedding_model="mobilenet_v3_small",
+                embedding_version="1.0",
+                first_seen=record.first_seen,
+                last_seen=record.last_seen
+            )
         self._dispatch_queue.append(event)
 
     def get_dispatchable_events(self) -> List[DetectionEvent]:
