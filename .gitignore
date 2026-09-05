@@ -38,6 +38,7 @@ contextAboutPorject/
 .pytest_cache/
 *.log
 logs/
+tests/output/
 
 # IDE & OS files
 .vscode/

@@ -1,14 +1,19 @@
+--extra-index-url https://download.pytorch.org/whl/cpu
+
 # Core Computer Vision & Numerical Processing
 numpy>=1.26.0
 opencv-python>=4.8.0
 pillow>=10.0.0
 
-# Deep Learning & Object Tracking
+# Deep Learning & Object Tracking (CPU optimized)
 torch>=2.0.0
 torchvision>=0.15.0
 ultralytics>=8.0.0
+lap>=0.5.12
+easyocr>=1.7.0
 
-# Data Validation & Networking
+# Data Validation, Networking & Config
 pydantic>=2.0.0
 httpx>=0.25.0
 python-dotenv>=1.0.0
+pyyaml>=6.0
