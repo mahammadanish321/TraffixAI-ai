@@ -2,6 +2,7 @@ import cv2
 import time
 import sys
 import os
+import argparse
 from typing import Dict
 
 # Ensure project root is in sys.path
@@ -14,26 +15,30 @@ from schemas.track import TrackState
 from client.backend_client import BackendClient
 from identity import IdentityPipeline
 
-def run_ai_service():
+def run_ai_service(camera_id: str = None, video_source: str = None, backend_url: str = None):
+    cam_id = camera_id or settings.CAMERA_ID
+    src = video_source or settings.VIDEO_SOURCE
+    backend = backend_url or settings.BACKEND_URL
+
     print("=" * 65)
-    print(f"       TRAFFIX AI — AI SERVICE PIPELINE (CAMERA: {settings.CAMERA_ID})       ")
+    print(f"       TRAFFIX AI — AI SERVICE PIPELINE (CAMERA: {cam_id})       ")
     print("=" * 65)
     print("Architecture: YOLO (detect) -> BoT-SORT (track) -> Identity (ANPR + ReID)")
     print("Track Lifecycle: NEW -> ACTIVE -> TEMPORARILY_LOST -> ENDED")
     print("=" * 65)
 
     # 1. Initialize Pipeline Modules
-    stream = VideoStream(source=settings.VIDEO_SOURCE, loop=True)
+    stream = VideoStream(source=src, loop=True)
     identity_pipeline = IdentityPipeline()
-    tracker = VehicleTracker(camera_id=settings.CAMERA_ID, identity_pipeline=identity_pipeline)
-    backend_client = BackendClient(base_url=settings.BACKEND_URL)
+    tracker = VehicleTracker(camera_id=cam_id, identity_pipeline=identity_pipeline)
+    backend_client = BackendClient(base_url=backend)
 
     last_heartbeat_time = 0.0
     start_time = time.time()
     total_events_dispatched = 0
 
-    print(f"[INFO] Streaming started: {settings.VIDEO_SOURCE}")
-    print(f"[INFO] Target Backend   : {settings.BACKEND_URL}")
+    print(f"[INFO] Streaming started: {src}")
+    print(f"[INFO] Target Backend   : {backend}")
     print("Press 'q' in the video window to stop.")
     print("=" * 65)
 
@@ -93,7 +98,7 @@ def run_ai_service():
             current_now = time.time()
             if current_now - last_heartbeat_time >= settings.HEARTBEAT_INTERVAL_SEC:
                 backend_client.send_heartbeat(
-                    camera_id=settings.CAMERA_ID,
+                    camera_id=cam_id,
                     fps=current_fps,
                     processing_latency_ms=iter_latency_ms
                 )
@@ -102,7 +107,7 @@ def run_ai_service():
             # 7. Render HUD Overlay
             active_count = sum(1 for t in active_tracks if t.state == TrackState.ACTIVE)
             lost_count = sum(1 for t in active_tracks if t.state == TrackState.TEMPORARILY_LOST)
-            hud_text = f"CAM: {settings.CAMERA_ID} | FPS: {current_fps:.1f} | Active: {active_count} | Lost: {lost_count} | Events: {total_events_dispatched}"
+            hud_text = f"CAM: {cam_id} | FPS: {current_fps:.1f} | Active: {active_count} | Lost: {lost_count} | Events: {total_events_dispatched}"
             cv2.putText(frame, hud_text, (20, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 255, 255), 2, cv2.LINE_AA)
 
             try:
@@ -120,4 +125,10 @@ def run_ai_service():
         print(f"[SUCCESS] AI Service session ended. Total consolidated events: {total_events_dispatched}")
 
 if __name__ == "__main__":
-    run_ai_service()
+    parser = argparse.ArgumentParser(description="Traffix AI — Multi-Camera Video Pipeline")
+    parser.add_argument("--camera-id", type=str, default=settings.CAMERA_ID, help="Camera ID (e.g. CAM_001, CAM_002)")
+    parser.add_argument("--video", type=str, default=settings.VIDEO_SOURCE, help="Path to video file or stream URL")
+    parser.add_argument("--backend-url", type=str, default=settings.BACKEND_URL, help="Backend URL")
+    args = parser.parse_args()
+
+    run_ai_service(camera_id=args.camera_id, video_source=args.video, backend_url=args.backend_url)
