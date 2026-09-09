@@ -15,7 +15,14 @@ from schemas.track import TrackState
 from client.backend_client import BackendClient
 from identity import IdentityPipeline
 
-def run_ai_service(camera_id: str = None, video_source: str = None, backend_url: str = None):
+def run_ai_service(
+    camera_id: str = None,
+    video_source: str = None,
+    backend_url: str = None,
+    headless: bool = False,
+    loop: bool = False,
+    max_frames: int = 0
+):
     cam_id = camera_id or settings.CAMERA_ID
     src = video_source or settings.VIDEO_SOURCE
     backend = backend_url or settings.BACKEND_URL
@@ -28,7 +35,7 @@ def run_ai_service(camera_id: str = None, video_source: str = None, backend_url:
     print("=" * 65)
 
     # 1. Initialize Pipeline Modules
-    stream = VideoStream(source=src, loop=True)
+    stream = VideoStream(source=src, loop=loop)
     identity_pipeline = IdentityPipeline()
     tracker = VehicleTracker(camera_id=cam_id, identity_pipeline=identity_pipeline)
     backend_client = BackendClient(base_url=backend)
@@ -39,7 +46,9 @@ def run_ai_service(camera_id: str = None, video_source: str = None, backend_url:
 
     print(f"[INFO] Streaming started: {src}")
     print(f"[INFO] Target Backend   : {backend}")
-    print("Press 'q' in the video window to stop.")
+    print(f"[INFO] Headless Mode    : {headless}")
+    if not headless:
+        print("Press 'q' in the video window to stop.")
     print("=" * 65)
 
     try:
@@ -110,18 +119,27 @@ def run_ai_service(camera_id: str = None, video_source: str = None, backend_url:
             hud_text = f"CAM: {cam_id} | FPS: {current_fps:.1f} | Active: {active_count} | Lost: {lost_count} | Events: {total_events_dispatched}"
             cv2.putText(frame, hud_text, (20, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 255, 255), 2, cv2.LINE_AA)
 
-            try:
-                cv2.imshow("Traffix AI — Track Lifecycle Pipeline", frame)
-                if cv2.waitKey(1) & 0xFF == ord('q'):
-                    print("\n[INFO] AI Service stopped by user.")
-                    break
-            except cv2.error:
-                pass
+            if not headless:
+                try:
+                    cv2.imshow("Traffix AI — Track Lifecycle Pipeline", frame)
+                    if cv2.waitKey(1) & 0xFF == ord('q'):
+                        print("\n[INFO] AI Service stopped by user.")
+                        break
+                except cv2.error:
+                    pass
+
+            if max_frames > 0 and frame_num >= max_frames:
+                print(f"\n[INFO] Reached max-frames limit ({max_frames}). Finishing run.")
+                break
 
     finally:
         stream.release()
         backend_client.close()
-        cv2.destroyAllWindows()
+        if not headless:
+            try:
+                cv2.destroyAllWindows()
+            except Exception:
+                pass
         print(f"[SUCCESS] AI Service session ended. Total consolidated events: {total_events_dispatched}")
 
 if __name__ == "__main__":
@@ -129,6 +147,16 @@ if __name__ == "__main__":
     parser.add_argument("--camera-id", type=str, default=settings.CAMERA_ID, help="Camera ID (e.g. CAM_001, CAM_002)")
     parser.add_argument("--video", type=str, default=settings.VIDEO_SOURCE, help="Path to video file or stream URL")
     parser.add_argument("--backend-url", type=str, default=settings.BACKEND_URL, help="Backend URL")
+    parser.add_argument("--headless", action="store_true", help="Run without graphical display (cv2.imshow)")
+    parser.add_argument("--loop", action="store_true", help="Continuously loop the video file")
+    parser.add_argument("--max-frames", type=int, default=0, help="Maximum number of frames to process before exiting (0 = all)")
     args = parser.parse_args()
 
-    run_ai_service(camera_id=args.camera_id, video_source=args.video, backend_url=args.backend_url)
+    run_ai_service(
+        camera_id=args.camera_id,
+        video_source=args.video,
+        backend_url=args.backend_url,
+        headless=args.headless,
+        loop=args.loop,
+        max_frames=args.max_frames
+    )

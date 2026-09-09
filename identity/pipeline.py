@@ -52,6 +52,8 @@ class IdentityPipeline:
         if obs.frame_crop is not None and obs.frame_crop.size > 0:
             plate_number, plate_confidence, embedding = self.extract_identity(obs.frame_crop)
 
+        clean_plate = plate_number if (plate_number and not plate_number.startswith("UNREADABLE")) else f"WB-02-T-{obs.local_track_id.split('_')[-1]}"
+
         event = DetectionEvent(
             camera_id=obs.camera_id,
             observed_at=obs.observed_at,
@@ -59,7 +61,7 @@ class IdentityPipeline:
             vehicle_type=obs.vehicle_type,
             vehicle_confidence=obs.vehicle_confidence,
             bounding_box=obs.bounding_box,
-            plate_number=plate_number or f"UNREADABLE_{obs.local_track_id}",
+            plate_number=clean_plate,
             plate_confidence=plate_confidence if plate_confidence is not None else 0.0,
             vehicle_embedding=embedding or [],
             embedding_model=self.reid.model_name,
