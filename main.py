@@ -141,6 +141,7 @@ def run_ai_service(
             except Exception:
                 pass
         print(f"[SUCCESS] AI Service session ended. Total consolidated events: {total_events_dispatched}")
+        return total_events_dispatched
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Traffix AI — Multi-Camera Video Pipeline")
