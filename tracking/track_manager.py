@@ -168,11 +168,30 @@ class TrackManager:
                     if record.missed_frame_count > self.max_lost_frames:
                         # ── State Transition: TEMPORARILY_LOST -> ENDED ──
                         record.state = TrackState.ENDED
+                        if record.event_dispatched and not getattr(record, 'exit_dispatched', False):
+                            record.exit_dispatched = True
+                            self._enqueue_exit_event(record)
                     else:
                         # Continue coasting
                         self._coast_track(record, w_img, h_img, timestamp_sec)
 
         return self.get_active_tracks()
+
+    def _enqueue_exit_event(self, record: TrackRecord):
+        """Dispatches vehicle exited lifecycle notification to backend."""
+        event = DetectionEvent(
+            camera_id=record.camera_id,
+            observed_at=record.last_seen,
+            local_track_id=record.local_track_id,
+            vehicle_type=record.vehicle_type,
+            vehicle_confidence=record.peak_confidence,
+            bounding_box=record.bbox,
+            plate_number=record.plate_number,
+            plate_confidence=record.plate_confidence,
+            vehicle_embedding=[],
+            status="exited"
+        )
+        self._dispatch_queue.append(event)
 
     def _coast_track(self, record: TrackRecord, w_img: int, h_img: int, timestamp_sec: float):
         """Extrapolates track position using last known velocity during temporary detection drops."""

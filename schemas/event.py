@@ -24,6 +24,7 @@ class DetectionEvent(BaseModel):
     frame_reference: Optional[str] = None
     first_seen: Optional[str] = None
     last_seen: Optional[str] = None
+    status: Optional[str] = "active"
 
 
 class BatchDetectionEvents(BaseModel):
