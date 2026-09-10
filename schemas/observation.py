@@ -7,6 +7,8 @@ class BoundingBox(BaseModel):
     y1: int = Field(..., description="Top-left Y pixel coordinate")
     x2: int = Field(..., description="Bottom-right X pixel coordinate")
     y2: int = Field(..., description="Bottom-right Y pixel coordinate")
+    frame_width: Optional[int] = Field(default=None, description="Original video frame width in pixels")
+    frame_height: Optional[int] = Field(default=None, description="Original video frame height in pixels")
 
 class VehicleObservation(BaseModel):
     """

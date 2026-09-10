@@ -52,7 +52,8 @@ class IdentityPipeline:
         if obs.frame_crop is not None and obs.frame_crop.size > 0:
             plate_number, plate_confidence, embedding = self.extract_identity(obs.frame_crop)
 
-        clean_plate = plate_number if (plate_number and not plate_number.startswith("UNREADABLE")) else f"WB-02-T-{obs.local_track_id.split('_')[-1]}"
+        # Genuine license plate read by EasyOCR (or None if plate is unreadable)
+        clean_plate = plate_number if (plate_number and not plate_number.startswith("UNREADABLE")) else None
 
         event = DetectionEvent(
             camera_id=obs.camera_id,

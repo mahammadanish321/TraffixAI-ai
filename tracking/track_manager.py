@@ -84,7 +84,7 @@ class TrackManager:
                     state=TrackState.NEW,
                     latest_confidence=conf,
                     peak_confidence=conf,
-                    bbox=BoundingBox(x1=x1, y1=y1, x2=x2, y2=y2),
+                    bbox=BoundingBox(x1=x1, y1=y1, x2=x2, y2=y2, frame_width=w_img, frame_height=h_img),
                     smoothed_bbox=(float(x1), float(y1), float(x2), float(y2)),
                     velocity=(0.0, 0.0),
                     first_seen=now_iso,
@@ -126,7 +126,7 @@ class TrackManager:
                 curr_cy = sm_y2
                 record.velocity = (curr_cx - prev_cx, curr_cy - prev_cy)
                 record.smoothed_bbox = (sm_x1, sm_y1, sm_x2, sm_y2)
-                record.bbox = BoundingBox(x1=int(sm_x1), y1=int(sm_y1), x2=int(sm_x2), y2=int(sm_y2))
+                record.bbox = BoundingBox(x1=int(sm_x1), y1=int(sm_y1), x2=int(sm_x2), y2=int(sm_y2), frame_width=w_img, frame_height=h_img)
 
             # Record trajectory contact point (center bottom)
             center_x = int((record.smoothed_bbox[0] + record.smoothed_bbox[2]) / 2)
