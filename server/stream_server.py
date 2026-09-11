@@ -37,6 +37,8 @@ app.add_middleware(
 # Global models and cache
 plate_model: Optional[YOLO] = None
 plate_model_lock = threading.Lock()
+anpr_engine_instance = None
+anpr_engine_lock = threading.Lock()
 
 def get_plate_model() -> Optional[YOLO]:
     global plate_model
@@ -54,6 +56,17 @@ def get_plate_model() -> Optional[YOLO]:
                 print(f"[WARN] License plate model not found at {model_path}")
         return plate_model
 
+def get_anpr_engine():
+    global anpr_engine_instance
+    with anpr_engine_lock:
+        if anpr_engine_instance is None:
+            from anpr.ocr_engine import ANPREngine
+            try:
+                anpr_engine_instance = ANPREngine(gpu=False)
+            except Exception as e:
+                print(f"[WARN] Failed to load ANPREngine: {e}")
+        return anpr_engine_instance
+
 # Stream Generators per Camera
 class CameraStreamWorker:
     def __init__(self, camera_id: str, video_path: str, backend_url: str):
@@ -61,7 +74,6 @@ class CameraStreamWorker:
         self.video_path = video_path
         self.backend_url = backend_url
         self.lock = threading.Lock()
-        self.identity_pipeline = IdentityPipeline(use_gpu=False)
         self.tracker = VehicleTracker(camera_id=camera_id, identity_pipeline=None)
         self.backend_client = BackendClient(base_url=backend_url)
         self.current_jpeg: Optional[bytes] = None
@@ -86,6 +98,7 @@ class CameraStreamWorker:
                 self.event_queue.task_done()
 
     def _ocr_worker_loop(self):
+        engine = get_anpr_engine()
         while self.is_running:
             try:
                 task = self.ocr_queue.get(timeout=0.5)
@@ -94,7 +107,11 @@ class CameraStreamWorker:
 
             crop, track_ref = task
             try:
-                plate_text, ocr_conf = self.identity_pipeline.anpr.read_plate(crop)
+                if engine is not None:
+                    plate_text, ocr_conf = engine.read_plate(crop)
+                else:
+                    plate_text, ocr_conf = None, None
+
                 if plate_text and len(plate_text) >= 4 and track_ref:
                     track_ref.plate_number = plate_text
                     track_ref.plate_confidence = ocr_conf or 0.90
@@ -347,6 +364,25 @@ def frame_generator(worker: CameraStreamWorker) -> Generator[bytes, None, None]:
             yield (b"--frame\r\n"
                    b"Content-Type: image/jpeg\r\n\r\n" + jpeg + b"\r\n")
         time.sleep(0.035)
+
+from pydantic import BaseModel
+
+class DetectRequest(BaseModel):
+    camera_id: str
+    video_source: Optional[str] = None
+    backend_url: Optional[str] = "http://localhost:8000"
+    max_frames: Optional[int] = None
+
+@app.post("/api/v1/detect")
+def trigger_detection(req: DetectRequest):
+    resolved_video = resolve_video_file(req.camera_id, req.video_source)
+    worker = get_or_create_worker(req.camera_id, resolved_video, req.backend_url or "http://localhost:8000")
+    return {
+        "success": True,
+        "message": f"Continuous AI detection active for {req.camera_id}",
+        "camera_id": req.camera_id,
+        "video_path": resolved_video,
+    }
 
 @app.get("/api/v1/stream/{camera_id}")
 def stream_camera(
