@@ -1,22 +1,32 @@
+import os
 import cv2
 import numpy as np
 import easyocr
 from typing import Tuple, Optional, List
+from ultralytics import YOLO
 from anpr.preprocessor import extract_plate_roi, preprocess_plate_for_ocr
 from anpr.plate_parser import clean_and_correct_plate
 
 class ANPREngine:
     """
-    Automatic Number Plate Recognition (ANPR) Engine (Person 2 Component).
+    Automatic Number Plate Recognition (ANPR) Engine.
     
     Responsibilities:
-    - Isolates candidate license plate regions from vehicle crops.
+    - Pinpoints license plate sub-bounding box using license_plate_detector.pt (or ROI extraction).
     - Enhances character contrast via bilateral filtering and CLAHE.
-    - Performs deep learning OCR character recognition.
+    - Performs deep learning OCR character recognition (EasyOCR).
     - Applies Indian registration syntax rules to correct optical ambiguities.
     """
-    def __init__(self, gpu: bool = False):
+    def __init__(self, gpu: bool = False, model_path: Optional[str] = None):
         self.reader = easyocr.Reader(["en"], gpu=gpu, verbose=False)
+        self.plate_detector: Optional[YOLO] = None
+        
+        default_model = model_path or os.path.join(os.path.dirname(__file__), "..", "models", "license_plate_detector.pt")
+        if os.path.exists(default_model):
+            try:
+                self.plate_detector = YOLO(default_model)
+            except Exception as e:
+                print(f"[WARN] Could not load license_plate_detector in ANPREngine: {e}")
 
     def read_plate(self, vehicle_crop: np.ndarray) -> Tuple[Optional[str], Optional[float]]:
         """
@@ -29,8 +39,30 @@ class ANPREngine:
             return (None, None)
 
         try:
-            # 1. Extract lower vehicle region where plate resides
-            plate_roi = extract_plate_roi(vehicle_crop)
+            # 1. First attempt: locate exact plate ROI with YOLO plate detector
+            plate_roi = None
+            if self.plate_detector is not None:
+                try:
+                    p_res = self.plate_detector(vehicle_crop, conf=0.20, verbose=False)[0]
+                    if p_res.boxes is not None and len(p_res.boxes) > 0:
+                        # Take highest conf box
+                        best_pbox = max(p_res.boxes, key=lambda b: float(b.conf[0]))
+                        px1, py1, px2, py2 = [max(0, int(v)) for v in best_pbox.xyxy[0].tolist()]
+                        # Add small padding if within crop bounds
+                        pad = 4
+                        vh, vw = vehicle_crop.shape[:2]
+                        px1 = max(0, px1 - pad)
+                        py1 = max(0, py1 - pad)
+                        px2 = min(vw, px2 + pad)
+                        py2 = min(vh, py2 + pad)
+                        if (px2 - px1) > 10 and (py2 - py1) > 8:
+                            plate_roi = vehicle_crop[py1:py2, px1:px2].copy()
+                except Exception:
+                    plate_roi = None
+
+            # Fallback to lower vehicle bumper heuristic
+            if plate_roi is None or plate_roi.size == 0:
+                plate_roi = extract_plate_roi(vehicle_crop)
 
             # 2. Preprocess (Upscale + Bilateral + CLAHE)
             preprocessed = preprocess_plate_for_ocr(plate_roi, upscale_factor=2.0)
