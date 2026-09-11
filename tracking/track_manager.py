@@ -137,17 +137,30 @@ class TrackManager:
 
             # Evaluate Crop Quality for Person 2 (Area * Confidence)
             crop_score = box_area * conf
+            is_better_crop = False
             if crop_score > record.best_crop_score:
                 crop_y1, crop_y2 = max(0, int(record.smoothed_bbox[1])), min(h_img, int(record.smoothed_bbox[3]))
                 crop_x1, crop_x2 = max(0, int(record.smoothed_bbox[0])), min(w_img, int(record.smoothed_bbox[2]))
                 if crop_y2 > crop_y1 and crop_x2 > crop_x1:
                     record.best_crop = frame[crop_y1:crop_y2, crop_x1:crop_x2].copy()
                     record.best_crop_score = crop_score
+                    is_better_crop = True
 
-            # Trigger consolidated event once confirmed ACTIVE
-            if record.state == TrackState.ACTIVE and not record.event_dispatched:
-                self._enqueue_event(record)
-                record.event_dispatched = True
+            # Trigger consolidated event once confirmed ACTIVE or when a better plate is found
+            if record.state == TrackState.ACTIVE:
+                if not record.event_dispatched:
+                    self._enqueue_event(record)
+                    record.event_dispatched = True
+                elif is_better_crop and self.identity_pipeline is not None and (not record.plate_number or record.plate_number.startswith("TRACK_")):
+                    # Try reading plate on new improved crop
+                    try:
+                        p_num, p_conf, _ = self.identity_pipeline.extract_identity(record.best_crop)
+                        if p_num and not p_num.startswith("UNREADABLE") and len(p_num) >= 4:
+                            record.plate_number = p_num
+                            record.plate_confidence = p_conf or 0.85
+                            self._enqueue_event(record)
+                    except Exception:
+                        pass
 
         # 2. Process vehicles NOT detected in this frame (handle missing/coasting/ended)
         for track_id, record in list(self.tracks.items()):

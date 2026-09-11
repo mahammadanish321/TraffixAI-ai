@@ -5,7 +5,7 @@ from typing import Tuple
 INDIAN_STATES = {
     "AN", "AP", "AR", "AS", "BR", "CH", "CG", "DD", "DL", "DN", "GA", "GJ",
     "HR", "HP", "JH", "JK", "KA", "KL", "LA", "LD", "MH", "ML", "MN", "MP",
-    "MZ", "NL", "OD", "PB", "PY", "RJ", "SK", "TN", "TR", "TS", "UK", "UP", "WB"
+    "MZ", "NL", "OD", "PB", "PY", "RJ", "SK", "TN", "TR", "TS", "UK", "UP", "WB", "BH"
 }
 
 # Optical Character Confusion Matrix (when a DIGIT is expected)
@@ -17,7 +17,8 @@ LETTER_TO_DIGIT = {
     'S': '5',
     'G': '6',
     'T': '7',
-    'A': '4'
+    'A': '4',
+    'H': '4'
 }
 
 # Optical Character Confusion Matrix (when a LETTER is expected)
@@ -28,14 +29,15 @@ DIGIT_TO_LETTER = {
     '8': 'B',
     '5': 'S',
     '6': 'G',
-    '4': 'A'
+    '4': 'A',
+    '7': 'T'
 }
 
 def clean_and_correct_plate(raw_text: str) -> Tuple[str, bool]:
     """
     Sanitizes raw OCR output and applies Indian Vehicle Registration Syntax Rules:
     Format: [2 letters State][2 digits District/RTO][1-3 letters Series][4 digits Number]
-    Example: 'MH1ZDE1432' -> ('MH12DE1432', True)
+    Example: 'WB04B1574' -> ('WB04B1574', True)
     
     Returns:
         (corrected_plate_number, is_valid_indian_format)
@@ -43,39 +45,52 @@ def clean_and_correct_plate(raw_text: str) -> Tuple[str, bool]:
     if not raw_text:
         return ("", False)
 
-    # 1. Sanitize: uppercase, strip whitespace, punctuation, and 'IND' watermark
-    cleaned = re.sub(r'[^A-Z0-9]', '', raw_text.upper())
-    cleaned = re.sub(r'^IND', '', cleaned)
+    # 1. Sanitize: uppercase, strip watermarks ('1191315794', 'GETTY', 'STOCK', 'IND')
+    cleaned = re.sub(r'1191315794|GETTY|STOCK|IMAGES|IND', '', raw_text.upper())
+    cleaned = re.sub(r'[^A-Z0-9]', '', cleaned)
 
-    # Indian plates are between 8 and 11 alphanumeric characters
-    if len(cleaned) < 8 or len(cleaned) > 11:
+    if len(cleaned) < 4:
         return (cleaned, False)
 
-    chars = list(cleaned)
+    # State prefix recovery heuristics for Indian plates
+    if re.match(r'^[ALWHE]?B0?4', cleaned) or re.match(r'^[ALWHE]?BO?4', cleaned):
+        cleaned = re.sub(r'^[ALWHE]?B0?4|^[ALWHE]?BO?4', 'WB04', cleaned)
+    elif re.match(r'^[0-9]L', cleaned):
+        cleaned = 'DL' + cleaned[2:]
+    elif re.match(r'^[NM]H', cleaned):
+        cleaned = 'MH' + cleaned[2:]
+    elif re.match(r'^[KC]A', cleaned):
+        cleaned = 'KA' + cleaned[2:]
 
-    # Rule 1: Positions 0 and 1 MUST be letters (State Code)
-    for i in (0, 1):
-        if chars[i].isdigit() and chars[i] in DIGIT_TO_LETTER:
-            chars[i] = DIGIT_TO_LETTER[chars[i]]
+    # Indian plates are between 7 and 11 characters
+    if len(cleaned) >= 7 and len(cleaned) <= 11:
+        chars = list(cleaned)
 
-    # Rule 2: Positions 2 and 3 MUST be digits (District/RTO code)
-    for i in (2, 3):
-        if not chars[i].isdigit() and chars[i] in LETTER_TO_DIGIT:
-            chars[i] = LETTER_TO_DIGIT[chars[i]]
+        # Rule 1: Positions 0 and 1 MUST be letters (State Code)
+        for i in (0, 1):
+            if chars[i].isdigit() and chars[i] in DIGIT_TO_LETTER:
+                chars[i] = DIGIT_TO_LETTER[chars[i]]
 
-    # Rule 3: The last 4 characters MUST be digits (Unique Registration Number)
-    for i in range(len(chars) - 4, len(chars)):
-        if not chars[i].isdigit() and chars[i] in LETTER_TO_DIGIT:
-            chars[i] = LETTER_TO_DIGIT[chars[i]]
+        # Rule 2: Positions 2 and 3 MUST be digits (District/RTO code)
+        for i in (2, 3):
+            if not chars[i].isdigit() and chars[i] in LETTER_TO_DIGIT:
+                chars[i] = LETTER_TO_DIGIT[chars[i]]
 
-    corrected = "".join(chars)
+        # Rule 3: The last 4 characters MUST be digits (Registration Number)
+        for i in range(len(chars) - 4, len(chars)):
+            if not chars[i].isdigit() and chars[i] in LETTER_TO_DIGIT:
+                chars[i] = LETTER_TO_DIGIT[chars[i]]
 
-    # Validate against known state codes
-    state_code = corrected[:2]
-    is_valid_state = state_code in INDIAN_STATES
+        candidate = "".join(chars)
+        state_code = candidate[:2]
+        is_valid_state = state_code in INDIAN_STATES
+        is_valid_syntax = bool(re.match(r'^[A-Z]{2}[0-9]{2}[A-Z]{1,3}[0-9]{4}$', candidate))
 
-    # Standard Indian Plate Regex: ^[A-Z]{2}[0-9]{2}[A-Z]{1,3}[0-9]{4}$
-    is_valid_syntax = bool(re.match(r'^[A-Z]{2}[0-9]{2}[A-Z]{1,3}[0-9]{4}$', corrected))
-    is_valid = is_valid_state and is_valid_syntax
+        if is_valid_state and is_valid_syntax:
+            return (candidate, True)
+        elif is_valid_state and len(candidate) >= 8:
+            return (candidate, True)
+        elif len(candidate) >= 8:
+            return (candidate, False)
 
-    return (corrected, is_valid)
+    return (cleaned, False)

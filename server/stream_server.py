@@ -96,30 +96,74 @@ class CameraStreamWorker:
                     for ev in events:
                         self.backend_client.send_detection_event(ev)
 
-                    # 3. Detect License Plate Boxes if Plate Model available
-                    if p_detector is not None and frame_num % 3 == 0:
+                    # 3. Detect & OCR License Plate Boxes
+                    if p_detector is not None and frame_num % 2 == 0:
                         try:
-                            plate_res = p_detector(frame, conf=0.22, verbose=False)[0]
+                            plate_res = p_detector(frame, conf=0.18, verbose=False)[0]
                             if plate_res.boxes is not None and len(plate_res.boxes) > 0:
                                 new_plates = []
                                 for pbox in plate_res.boxes:
                                     px1, py1, px2, py2 = [int(v) for v in pbox.xyxy[0].tolist()]
                                     pconf = float(pbox.conf[0])
-                                    new_plates.append((px1, py1, px2, py2, pconf))
+
+                                    # Crop and OCR candidate plate
+                                    pad = 4
+                                    crop = frame[max(0, py1 - pad):min(frame.shape[0], py2 + pad), max(0, px1 - pad):min(frame.shape[1], px2 + pad)]
+                                    plate_text = None
+                                    ocr_conf = None
+                                    if crop.size > 0:
+                                        plate_text, ocr_conf = self.identity_pipeline.anpr.read_plate(crop)
+
+                                    new_plates.append((px1, py1, px2, py2, pconf, plate_text))
+
+                                    # Link plate to containing vehicle track
+                                    pcx = (px1 + px2) // 2
+                                    pcy = (py1 + py2) // 2
+                                    for track in active_tracks:
+                                        if (track.bbox.x1 - 20 <= pcx <= track.bbox.x2 + 20 and
+                                            track.bbox.y1 - 20 <= pcy <= track.bbox.y2 + 20):
+                                            if plate_text and len(plate_text) >= 4:
+                                                if track.plate_number != plate_text:
+                                                    track.plate_number = plate_text
+                                                    track.plate_confidence = ocr_conf or pconf
+                                                    # Dispatch real-time update with recognized plate
+                                                    from schemas.event import DetectionEvent
+                                                    now_iso = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+                                                    upd_ev = DetectionEvent(
+                                                        camera_id=self.camera_id,
+                                                        observed_at=now_iso,
+                                                        local_track_id=track.local_track_id,
+                                                        vehicle_type=track.vehicle_type,
+                                                        vehicle_confidence=track.latest_confidence,
+                                                        bounding_box=track.bbox,
+                                                        plate_number=plate_text,
+                                                        plate_confidence=track.plate_confidence,
+                                                        vehicle_embedding=[],
+                                                        first_seen=track.first_seen,
+                                                        last_seen=now_iso,
+                                                        status="active"
+                                                    )
+                                                    self.backend_client.send_detection_event(upd_ev)
                                 latest_plates = new_plates
-                        except Exception:
+                        except Exception as e:
                             pass
 
-                    # Draw red plate boxes
-                    for px1, py1, px2, py2, pconf in latest_plates:
+                    # Draw sharp red plate boxes with recognized registration
+                    for plate_info in latest_plates:
+                        if len(plate_info) == 6:
+                            px1, py1, px2, py2, pconf, p_text = plate_info
+                        else:
+                            px1, py1, px2, py2, pconf = plate_info[:5]
+                            p_text = None
+
                         cv2.rectangle(frame, (px1, py1), (px2, py2), (0, 0, 255), 2)
-                        p_label = f"PLATE {int(pconf * 100)}%"
+                        p_label = f"PLATE: {p_text}" if p_text else f"PLATE {int(pconf * 100)}%"
                         cv2.putText(
                             frame,
                             p_label,
                             (px1, max(py1 - 5, 12)),
                             cv2.FONT_HERSHEY_SIMPLEX,
-                            0.4,
+                            0.42,
                             (0, 0, 255),
                             1,
                             cv2.LINE_AA,

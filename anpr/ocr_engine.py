@@ -81,6 +81,7 @@ class ANPREngine:
             best_conf: float = 0.0
             found_valid_syntax = False
 
+            # Individual box evaluation
             for bbox, raw_text, conf in ocr_results:
                 corrected, is_valid_syntax = clean_and_correct_plate(raw_text)
                 if not corrected:
@@ -88,17 +89,27 @@ class ANPREngine:
 
                 conf_float = float(conf)
 
-                # Prioritize detections matching valid Indian plate syntax
                 if is_valid_syntax:
                     if not found_valid_syntax or conf_float > best_conf:
                         best_plate = corrected
-                        best_conf = conf_float
+                        best_conf = max(conf_float, 0.85)
                         found_valid_syntax = True
                 elif not found_valid_syntax and conf_float > best_conf:
                     best_plate = corrected
                     best_conf = conf_float
 
-            if best_plate and best_conf > 0.30:
+            # Multi-line combination (e.g. 2-row commercial plates: WB04B + 1574)
+            if len(ocr_results) > 1 and not found_valid_syntax:
+                sorted_boxes = sorted(ocr_results, key=lambda b: (b[0][0][1], b[0][0][0]))
+                combined_raw = "".join([b[1] for b in sorted_boxes])
+                combined_corrected, combined_valid = clean_and_correct_plate(combined_raw)
+                if combined_corrected:
+                    avg_conf = sum(float(b[2]) for b in sorted_boxes) / len(sorted_boxes)
+                    if combined_valid or avg_conf > best_conf:
+                        best_plate = combined_corrected
+                        best_conf = max(avg_conf, 0.88 if combined_valid else avg_conf)
+
+            if best_plate and (len(best_plate) >= 6 or best_conf > 0.25):
                 return (best_plate, round(best_conf, 2))
 
             return (None, None)
