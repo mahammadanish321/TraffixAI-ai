@@ -62,13 +62,28 @@ class CameraStreamWorker:
         self.backend_url = backend_url
         self.lock = threading.Lock()
         self.identity_pipeline = IdentityPipeline(use_gpu=False)
-        self.tracker = VehicleTracker(camera_id=camera_id, identity_pipeline=self.identity_pipeline)
+        self.tracker = VehicleTracker(camera_id=camera_id, identity_pipeline=None)
         self.backend_client = BackendClient(base_url=backend_url)
         self.current_jpeg: Optional[bytes] = None
         self.is_running = False
         self.thread: Optional[threading.Thread] = None
-        self.ocr_queue = queue.Queue(maxsize=4)
+        self.ocr_queue = queue.Queue(maxsize=8)
         self.ocr_thread: Optional[threading.Thread] = None
+        self.event_queue = queue.Queue(maxsize=50)
+        self.event_thread: Optional[threading.Thread] = None
+
+    def _event_worker_loop(self):
+        while self.is_running:
+            try:
+                ev = self.event_queue.get(timeout=0.5)
+            except queue.Empty:
+                continue
+            try:
+                self.backend_client.send_detection_event(ev)
+            except Exception:
+                pass
+            finally:
+                self.event_queue.task_done()
 
     def _ocr_worker_loop(self):
         while self.is_running:
@@ -100,7 +115,10 @@ class CameraStreamWorker:
                         last_seen=now_iso,
                         status="active"
                     )
-                    self.backend_client.send_detection_event(upd_ev)
+                    try:
+                        self.event_queue.put_nowait(upd_ev)
+                    except queue.Full:
+                        pass
             except Exception:
                 pass
             finally:
@@ -109,6 +127,8 @@ class CameraStreamWorker:
     def start(self):
         if not self.is_running:
             self.is_running = True
+            self.event_thread = threading.Thread(target=self._event_worker_loop, daemon=True)
+            self.event_thread.start()
             self.ocr_thread = threading.Thread(target=self._ocr_worker_loop, daemon=True)
             self.ocr_thread.start()
             self.thread = threading.Thread(target=self._run_loop, daemon=True)
@@ -129,13 +149,16 @@ class CameraStreamWorker:
                     if not self.is_running:
                         break
 
-                    # 1. Update Tracker
+                    # 1. Update Tracker (Fast YOLO Tracking without blocking OCR)
                     active_tracks = self.tracker.update(frame, frame_num=frame_num, timestamp_sec=timestamp_sec)
 
-                    # 2. Dispatch events to Backend
+                    # 2. Dispatch events to Backend via non-blocking queue
                     events = self.tracker.track_manager.get_dispatchable_events()
                     for ev in events:
-                        self.backend_client.send_detection_event(ev)
+                        try:
+                            self.event_queue.put_nowait(ev)
+                        except queue.Full:
+                            pass
 
                     # 3. Detect License Plate Boxes with YOLO
                     if p_detector is not None and frame_num % 2 == 0:
@@ -312,6 +335,11 @@ def health_check():
     return {"status": "ok", "service": "traffix-ai-stream-daemon", "active_cameras": list(active_workers.keys())}
 
 def frame_generator(worker: CameraStreamWorker) -> Generator[bytes, None, None]:
+    for _ in range(50):
+        if worker.current_jpeg is not None or not worker.is_running:
+            break
+        time.sleep(0.04)
+
     while worker.is_running:
         with worker.lock:
             jpeg = worker.current_jpeg
