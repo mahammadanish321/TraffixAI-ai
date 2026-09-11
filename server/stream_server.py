@@ -259,6 +259,16 @@ def stream_camera(
         media_type="multipart/x-mixed-replace; boundary=frame"
     )
 
+@app.post("/api/v1/stream/stop/{camera_id}")
+def stop_stream_camera(camera_id: str):
+    with workers_lock:
+        if camera_id in active_workers:
+            worker = active_workers.pop(camera_id)
+            worker.stop()
+            print(f"[STREAM-SERVER] Stopped stream for {camera_id}")
+            return {"success": True, "message": f"Stream worker for {camera_id} stopped."}
+        return {"success": True, "message": f"No active stream for {camera_id}."}
+
 if __name__ == "__main__":
     print("=" * 65)
     print("      TRAFFIX AI — LIVE STREAM DAEMON (PORT 8002)      ")
