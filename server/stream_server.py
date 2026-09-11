@@ -361,8 +361,13 @@ def frame_generator(worker: CameraStreamWorker) -> Generator[bytes, None, None]:
         with worker.lock:
             jpeg = worker.current_jpeg
         if jpeg is not None:
-            yield (b"--frame\r\n"
-                   b"Content-Type: image/jpeg\r\n\r\n" + jpeg + b"\r\n")
+            yield (
+                b"--frame\r\n"
+                b"Content-Type: image/jpeg\r\n"
+                b"Content-Length: " + str(len(jpeg)).encode() + b"\r\n\r\n" +
+                jpeg +
+                b"\r\n"
+            )
         time.sleep(0.035)
 
 from pydantic import BaseModel
@@ -384,6 +389,22 @@ def trigger_detection(req: DetectRequest):
         "video_path": resolved_video,
     }
 
+@app.get("/api/v1/snapshot/{camera_id}")
+def snapshot_camera(
+    camera_id: str,
+    video_path: Optional[str] = Query(None),
+    backend_url: Optional[str] = Query("http://localhost:8000")
+):
+    resolved_video = resolve_video_file(camera_id, video_path)
+    worker = get_or_create_worker(camera_id, resolved_video, backend_url)
+    for _ in range(40):
+        with worker.lock:
+            jpeg = worker.current_jpeg
+        if jpeg is not None:
+            return Response(content=jpeg, media_type="image/jpeg", headers={"Cache-Control": "no-cache, no-store, must-revalidate"})
+        time.sleep(0.05)
+    return Response(content=b"", status_code=503)
+
 @app.get("/api/v1/stream/{camera_id}")
 def stream_camera(
     camera_id: str,
@@ -394,7 +415,13 @@ def stream_camera(
     worker = get_or_create_worker(camera_id, resolved_video, backend_url)
     return StreamingResponse(
         frame_generator(worker),
-        media_type="multipart/x-mixed-replace; boundary=frame"
+        media_type="multipart/x-mixed-replace; boundary=frame",
+        headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0",
+            "Connection": "close"
+        }
     )
 
 @app.post("/api/v1/stream/stop/{camera_id}")
