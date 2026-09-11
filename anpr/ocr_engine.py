@@ -5,7 +5,7 @@ import easyocr
 from typing import Tuple, Optional, List
 from ultralytics import YOLO
 from anpr.preprocessor import extract_plate_roi, preprocess_plate_for_ocr
-from anpr.plate_parser import clean_and_correct_plate
+from anpr.plate_parser import clean_and_correct_plate, INDIAN_STATES
 
 class ANPREngine:
     """
@@ -109,8 +109,10 @@ class ANPREngine:
                         best_plate = combined_corrected
                         best_conf = max(avg_conf, 0.88 if combined_valid else avg_conf)
 
-            if best_plate and (len(best_plate) >= 6 or best_conf > 0.25):
-                return (best_plate, round(best_conf, 2))
+            if best_plate:
+                is_indian_state = best_plate[:2] in INDIAN_STATES and len(best_plate) >= 7
+                if is_indian_state or found_valid_syntax:
+                    return (best_plate, round(best_conf, 2))
 
             return (None, None)
 
