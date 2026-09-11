@@ -39,30 +39,34 @@ class ANPREngine:
             return (None, None)
 
         try:
-            # 1. First attempt: locate exact plate ROI with YOLO plate detector
-            plate_roi = None
-            if self.plate_detector is not None:
-                try:
-                    p_res = self.plate_detector(vehicle_crop, conf=0.20, verbose=False)[0]
-                    if p_res.boxes is not None and len(p_res.boxes) > 0:
-                        # Take highest conf box
-                        best_pbox = max(p_res.boxes, key=lambda b: float(b.conf[0]))
-                        px1, py1, px2, py2 = [max(0, int(v)) for v in best_pbox.xyxy[0].tolist()]
-                        # Add small padding if within crop bounds
-                        pad = 4
-                        vh, vw = vehicle_crop.shape[:2]
-                        px1 = max(0, px1 - pad)
-                        py1 = max(0, py1 - pad)
-                        px2 = min(vw, px2 + pad)
-                        py2 = min(vh, py2 + pad)
-                        if (px2 - px1) > 10 and (py2 - py1) > 8:
-                            plate_roi = vehicle_crop[py1:py2, px1:px2].copy()
-                except Exception:
-                    plate_roi = None
+            vh, vw = vehicle_crop.shape[:2]
+            aspect_ratio = float(vw) / max(1, vh)
 
-            # Fallback to lower vehicle bumper heuristic
-            if plate_roi is None or plate_roi.size == 0:
-                plate_roi = extract_plate_roi(vehicle_crop)
+            # If it is already a direct license plate crop (e.g. from YOLO plate detector)
+            if (aspect_ratio >= 1.5 and vh <= 180 and vw <= 450) or (vh <= 80 and vw <= 300):
+                plate_roi = vehicle_crop.copy()
+            else:
+                # 1. Locate exact plate ROI with YOLO plate detector
+                plate_roi = None
+                if self.plate_detector is not None:
+                    try:
+                        p_res = self.plate_detector(vehicle_crop, conf=0.18, verbose=False)[0]
+                        if p_res.boxes is not None and len(p_res.boxes) > 0:
+                            best_pbox = max(p_res.boxes, key=lambda b: float(b.conf[0]))
+                            px1, py1, px2, py2 = [max(0, int(v)) for v in best_pbox.xyxy[0].tolist()]
+                            pad = 4
+                            px1 = max(0, px1 - pad)
+                            py1 = max(0, py1 - pad)
+                            px2 = min(vw, px2 + pad)
+                            py2 = min(vh, py2 + pad)
+                            if (px2 - px1) > 10 and (py2 - py1) > 8:
+                                plate_roi = vehicle_crop[py1:py2, px1:px2].copy()
+                    except Exception:
+                        plate_roi = None
+
+                # Fallback to lower vehicle bumper heuristic
+                if plate_roi is None or plate_roi.size == 0:
+                    plate_roi = extract_plate_roi(vehicle_crop)
 
             # 2. Preprocess (Upscale + Bilateral + CLAHE)
             preprocessed = preprocess_plate_for_ocr(plate_roi, upscale_factor=2.0)
