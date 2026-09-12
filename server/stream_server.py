@@ -303,36 +303,45 @@ workers_lock = threading.Lock()
 
 def resolve_video_file(camera_id: str, requested_path: Optional[str]) -> str:
     possible_paths = []
+    frontend_videos_dir = os.path.abspath(os.path.join(BASE_DIR, "..", "TraffixAI-F", "public", "videos"))
+    data_videos_dir = os.path.abspath(os.path.join(BASE_DIR, "data", "videos"))
+
     if requested_path:
-        possible_paths.append(requested_path)
         base_name = os.path.basename(requested_path)
-        possible_paths.append(os.path.join(BASE_DIR, "data", "videos", base_name))
-        possible_paths.append(os.path.join(BASE_DIR, "..", "TraffixAI-F", "public", "videos", base_name))
+        possible_paths.extend([
+            requested_path,
+            os.path.join(frontend_videos_dir, base_name),
+            os.path.join(data_videos_dir, base_name),
+            os.path.join(frontend_videos_dir, requested_path.lstrip("/")),
+            os.path.join(data_videos_dir, requested_path.lstrip("/")),
+        ])
 
     # Camera specific defaults
     if camera_id in ["CAM_002", "CAM_004"]:
         possible_paths.extend([
-            os.path.join(BASE_DIR, "data", "videos", "junction_traffic.mp4"),
-            os.path.join(BASE_DIR, "..", "TraffixAI-F", "public", "videos", "junction_traffic.mp4"),
-            os.path.join(BASE_DIR, "data", "videos", "gettyimages-465302231-640_adpp.mp4"),
+            os.path.join(frontend_videos_dir, "junction_traffic.mp4"),
+            os.path.join(data_videos_dir, "junction_traffic.mp4"),
+            os.path.join(frontend_videos_dir, "gettyimages-465302231-640_adpp.mp4"),
         ])
     else:
         possible_paths.extend([
-            os.path.join(BASE_DIR, "data", "videos", "sample_traffic.mp4"),
-            os.path.join(BASE_DIR, "..", "TraffixAI-F", "public", "videos", "sample_traffic.mp4"),
-            os.path.join(BASE_DIR, "data", "videos", "gettyimages-1191315794-640_adpp.mp4"),
-            os.path.join(BASE_DIR, "data", "videos", "215258_medium.mp4"),
+            os.path.join(frontend_videos_dir, "sample_traffic.mp4"),
+            os.path.join(frontend_videos_dir, "gettyimages-1191315794-640_adpp.mp4"),
+            os.path.join(data_videos_dir, "sample_traffic.mp4"),
+            os.path.join(data_videos_dir, "gettyimages-1191315794-640_adpp.mp4"),
+            os.path.join(data_videos_dir, "215258_medium.mp4"),
         ])
 
     for p in possible_paths:
-        if p and os.path.exists(p):
+        if p and os.path.exists(p) and os.path.isfile(p):
             return os.path.abspath(p)
 
-    # Absolute fallback
-    fallback_dir = os.path.join(BASE_DIR, "data", "videos")
-    files = [os.path.join(fallback_dir, f) for f in os.listdir(fallback_dir) if f.endswith(".mp4")]
-    if files:
-        return files[0]
+    # Absolute fallback: scan frontend then data
+    for scan_dir in [frontend_videos_dir, data_videos_dir]:
+        if os.path.exists(scan_dir):
+            files = [os.path.join(scan_dir, f) for f in os.listdir(scan_dir) if f.lower().endswith((".mp4", ".mov", ".avi", ".mkv", ".webm"))]
+            if files:
+                return os.path.abspath(files[0])
 
     return requested_path or ""
 
@@ -350,6 +359,30 @@ def get_or_create_worker(camera_id: str, video_path: str, backend_url: str) -> C
 @app.get("/health")
 def health_check():
     return {"status": "ok", "service": "traffix-ai-stream-daemon", "active_cameras": list(active_workers.keys())}
+
+@app.get("/api/v1/videos")
+def list_videos():
+    frontend_videos_dir = os.path.abspath(os.path.join(BASE_DIR, "..", "TraffixAI-F", "public", "videos"))
+    data_videos_dir = os.path.abspath(os.path.join(BASE_DIR, "data", "videos"))
+    video_map = {}
+    valid_exts = (".mp4", ".mov", ".avi", ".mkv", ".webm")
+
+    for scan_dir in [frontend_videos_dir, data_videos_dir]:
+        if os.path.exists(scan_dir):
+            for f in os.listdir(scan_dir):
+                if f.lower().endswith(valid_exts) and f not in video_map:
+                    fp = os.path.join(scan_dir, f)
+                    st = os.stat(fp)
+                    video_map[f] = {
+                        "id": f,
+                        "filename": f,
+                        "name": f.replace("-", " ").replace("_", " ").rsplit(".", 1)[0],
+                        "path": f"/videos/{f}",
+                        "sizeBytes": st.st_size,
+                        "sizeFormatted": f"{st.st_size / (1024 * 1024):.1f} MB",
+                        "diskPath": fp
+                    }
+    return {"success": True, "data": {"videos": list(video_map.values()), "total": len(video_map)}}
 
 def frame_generator(worker: CameraStreamWorker) -> Generator[bytes, None, None]:
     for _ in range(50):
