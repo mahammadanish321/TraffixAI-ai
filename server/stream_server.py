@@ -370,25 +370,23 @@ def health_check():
 @app.get("/api/v1/videos")
 def list_videos():
     frontend_videos_dir = os.path.abspath(os.path.join(BASE_DIR, "..", "TraffixAI-F", "public", "videos"))
-    data_videos_dir = os.path.abspath(os.path.join(BASE_DIR, "data", "videos"))
     video_map = {}
     valid_exts = (".mp4", ".mov", ".avi", ".mkv", ".webm")
 
-    for scan_dir in [frontend_videos_dir, data_videos_dir]:
-        if os.path.exists(scan_dir):
-            for f in os.listdir(scan_dir):
-                if f.lower().endswith(valid_exts) and f not in video_map:
-                    fp = os.path.join(scan_dir, f)
-                    st = os.stat(fp)
-                    video_map[f] = {
-                        "id": f,
-                        "filename": f,
-                        "name": f.replace("-", " ").replace("_", " ").rsplit(".", 1)[0],
-                        "path": f"/videos/{f}",
-                        "sizeBytes": st.st_size,
-                        "sizeFormatted": f"{st.st_size / (1024 * 1024):.1f} MB",
-                        "diskPath": fp
-                    }
+    if os.path.exists(frontend_videos_dir):
+        for f in sorted(os.listdir(frontend_videos_dir)):
+            if f.lower().endswith(valid_exts) and f not in video_map:
+                fp = os.path.join(frontend_videos_dir, f)
+                st = os.stat(fp)
+                video_map[f] = {
+                    "id": f,
+                    "filename": f,
+                    "name": f.replace("-", " ").replace("_", " ").rsplit(".", 1)[0],
+                    "path": f"/videos/{f}",
+                    "sizeBytes": st.st_size,
+                    "sizeFormatted": f"{st.st_size / (1024 * 1024):.1f} MB",
+                    "diskPath": fp
+                }
     return {"success": True, "data": {"videos": list(video_map.values()), "total": len(video_map)}}
 
 def frame_generator(worker: CameraStreamWorker) -> Generator[bytes, None, None]:
