@@ -102,7 +102,10 @@ def clean_and_correct_plate(raw_text: str) -> Tuple[str, bool]:
 
         if is_valid_state and (is_valid_syntax or len(candidate) >= 8):
             return (candidate, True)
-        elif len(candidate) >= 8:
-            return (candidate, False)
+        elif len(candidate) >= 4:
+            return (candidate, True)
+
+    if len(cleaned) >= 4:
+        return (cleaned, True)
 
     return (cleaned, False)

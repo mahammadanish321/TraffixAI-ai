@@ -116,7 +116,12 @@ class CameraStreamWorker:
                     track_ref.plate_number = plate_text
                     track_ref.plate_confidence = ocr_conf or 0.90
                     tag = track_ref.local_track_id.split('_')[-1]
+                    if hasattr(self.tracker, 'track_manager') and track_ref.local_track_id in self.tracker.track_manager.tracks:
+                        rec = self.tracker.track_manager.tracks[track_ref.local_track_id]
+                        rec.plate_number = plate_text
+                        rec.plate_confidence = track_ref.plate_confidence
                     print(f"\033[1;32m[AI-ANPR] 🎯 RECOGNIZED PLATE: [{plate_text}] (Conf: {int((ocr_conf or 0.90)*100)}%) on {track_ref.vehicle_type.upper()} #{tag} @ {self.camera_id}\033[0m", flush=True)
+
                     # Dispatch real-time update with recognized plate
                     from schemas.event import DetectionEvent
                     now_iso = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
@@ -203,10 +208,18 @@ class CameraStreamWorker:
                                             matched_track = track
                                             break
 
-                                    # Queue OCR if track has no plate yet
-                                    if matched_track and (not matched_track.plate_number or matched_track.plate_number.startswith("TRACK_")):
+                                    # Queue OCR if track has no valid readable plate yet
+                                    has_clean_plate = bool(
+                                        matched_track
+                                        and matched_track.plate_number
+                                        and not matched_track.plate_number.startswith("TRACK_")
+                                        and not matched_track.plate_number.startswith("CAM_")
+                                        and not matched_track.plate_number.startswith("UNREADABLE")
+                                        and not matched_track.plate_number.startswith("NO_PLATE")
+                                    )
+                                    if matched_track and not has_clean_plate:
                                         if not self.ocr_queue.full():
-                                            pad = 4
+                                            pad = 6
                                             crop = frame[max(0, py1 - pad):min(frame.shape[0], py2 + pad), max(0, px1 - pad):min(frame.shape[1], px2 + pad)].copy()
                                             if crop.size > 0:
                                                 try:
