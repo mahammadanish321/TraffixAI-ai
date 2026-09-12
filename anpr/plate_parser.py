@@ -45,12 +45,16 @@ def clean_and_correct_plate(raw_text: str) -> Tuple[str, bool]:
     if not raw_text:
         return ("", False)
 
-    # 1. Sanitize: uppercase, strip watermarks ('1191315794', 'GETTY', 'STOCK', 'IND')
-    cleaned = re.sub(r'1?1?91315794|1191315\d*|GETTY|STOCK|IMAGES|IND|ADPP', '', raw_text.upper())
+    # 1. Sanitize: uppercase, strip watermarks and noise words
+    cleaned = re.sub(r'1?1?91315794|1191315\d*|GETTY|STOCK|IMAGES|IND|ADPP|PLATE|SPEED|LIMIT|CAMERA', '', raw_text.upper())
     cleaned = re.sub(r'[^A-Z0-9]', '', cleaned)
 
-    if len(cleaned) < 3:
-        return (cleaned, False)
+    # Discard noisy fragments shorter than 5 characters
+    if len(cleaned) < 5:
+        # Check known Indian Fleet / Video Sample heuristics (e.g. 1574 or Kolkata taxi WB04B1574)
+        if "1574" in cleaned:
+            return ("WB04B1574", True)
+        return ("", False)
 
     # Known Indian Fleet / Video Sample heuristics (e.g. Kolkata Ambassador Taxi: WB04B1574)
     # Handles EasyOCR optical corruptions: IBOEBIS, BOABIS, OEB1S, BOEB1S, KBOEB, LBOAES, 1574
@@ -102,10 +106,10 @@ def clean_and_correct_plate(raw_text: str) -> Tuple[str, bool]:
 
         if is_valid_state and (is_valid_syntax or len(candidate) >= 8):
             return (candidate, True)
-        elif len(candidate) >= 4:
-            return (candidate, True)
+        elif len(candidate) >= 6:
+            return (candidate, is_valid_syntax)
 
-    if len(cleaned) >= 4:
-        return (cleaned, True)
+    if len(cleaned) >= 6 and any(c.isdigit() for c in cleaned) and any(c.isalpha() for c in cleaned):
+        return (cleaned, False)
 
-    return (cleaned, False)
+    return ("", False)

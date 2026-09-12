@@ -83,6 +83,7 @@ class CameraStreamWorker:
         self.ocr_thread: Optional[threading.Thread] = None
         self.event_queue = queue.Queue(maxsize=50)
         self.event_thread: Optional[threading.Thread] = None
+        self.track_ocr_votes: Dict[str, Dict[str, int]] = {}
 
     def _event_worker_loop(self):
         while self.is_running:
@@ -112,37 +113,47 @@ class CameraStreamWorker:
                 else:
                     plate_text, ocr_conf = None, None
 
-                if plate_text and len(plate_text) >= 4 and track_ref:
-                    track_ref.plate_number = plate_text
-                    track_ref.plate_confidence = ocr_conf or 0.90
-                    tag = track_ref.local_track_id.split('_')[-1]
-                    if hasattr(self.tracker, 'track_manager') and track_ref.local_track_id in self.tracker.track_manager.tracks:
-                        rec = self.tracker.track_manager.tracks[track_ref.local_track_id]
-                        rec.plate_number = plate_text
-                        rec.plate_confidence = track_ref.plate_confidence
-                    print(f"\033[1;32m[AI-ANPR] 🎯 RECOGNIZED PLATE: [{plate_text}] (Conf: {int((ocr_conf or 0.90)*100)}%) on {track_ref.vehicle_type.upper()} #{tag} @ {self.camera_id}\033[0m", flush=True)
+                if plate_text and len(plate_text) >= 5 and track_ref:
+                    track_id = track_ref.local_track_id
+                    if track_id not in self.track_ocr_votes:
+                        self.track_ocr_votes[track_id] = {}
+                    self.track_ocr_votes[track_id][plate_text] = self.track_ocr_votes[track_id].get(plate_text, 0) + 1
+                    vote_count = self.track_ocr_votes[track_id][plate_text]
 
-                    # Dispatch real-time update with recognized plate
-                    from schemas.event import DetectionEvent
-                    now_iso = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
-                    upd_ev = DetectionEvent(
-                        camera_id=self.camera_id,
-                        observed_at=now_iso,
-                        local_track_id=track_ref.local_track_id,
-                        vehicle_type=track_ref.vehicle_type,
-                        vehicle_confidence=track_ref.latest_confidence,
-                        bounding_box=track_ref.bbox,
-                        plate_number=plate_text,
-                        plate_confidence=track_ref.plate_confidence,
-                        vehicle_embedding=[],
-                        first_seen=track_ref.first_seen,
-                        last_seen=now_iso,
-                        status="active"
-                    )
-                    try:
-                        self.event_queue.put_nowait(upd_ev)
-                    except queue.Full:
-                        pass
+                    # Accept if validated high confidence (>= 0.85) or confirmed across >= 2 readings
+                    should_accept = (ocr_conf and ocr_conf >= 0.85) or vote_count >= 2
+
+                    if should_accept:
+                        track_ref.plate_number = plate_text
+                        track_ref.plate_confidence = ocr_conf or 0.90
+                        tag = track_id.split('_')[-1]
+                        if hasattr(self.tracker, 'track_manager') and track_id in self.tracker.track_manager.tracks:
+                            rec = self.tracker.track_manager.tracks[track_id]
+                            rec.plate_number = plate_text
+                            rec.plate_confidence = track_ref.plate_confidence
+                        print(f"\033[1;32m[AI-ANPR] 🎯 RECOGNIZED PLATE: [{plate_text}] (Conf: {int((ocr_conf or 0.90)*100)}%) on {track_ref.vehicle_type.upper()} #{tag} @ {self.camera_id}\033[0m", flush=True)
+
+                        # Dispatch real-time update with recognized plate
+                        from schemas.event import DetectionEvent
+                        now_iso = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+                        upd_ev = DetectionEvent(
+                            camera_id=self.camera_id,
+                            observed_at=now_iso,
+                            local_track_id=track_ref.local_track_id,
+                            vehicle_type=track_ref.vehicle_type,
+                            vehicle_confidence=track_ref.latest_confidence,
+                            bounding_box=track_ref.bbox,
+                            plate_number=plate_text,
+                            plate_confidence=track_ref.plate_confidence,
+                            vehicle_embedding=[],
+                            first_seen=track_ref.first_seen,
+                            last_seen=now_iso,
+                            status="active"
+                        )
+                        try:
+                            self.event_queue.put_nowait(upd_ev)
+                        except queue.Full:
+                            pass
             except Exception:
                 pass
             finally:
@@ -189,8 +200,8 @@ class CameraStreamWorker:
                         except queue.Full:
                             pass
 
-                    # 3. Detect License Plate Boxes with YOLO
-                    if p_detector is not None and frame_num % 2 == 0:
+                    # 3. Detect License Plate Boxes with YOLO (every 4 frames for high stream FPS)
+                    if p_detector is not None and frame_num % 4 == 0:
                         try:
                             plate_res = p_detector(frame, conf=0.18, verbose=False)[0]
                             if plate_res.boxes is not None and len(plate_res.boxes) > 0:
@@ -208,7 +219,7 @@ class CameraStreamWorker:
                                             matched_track = track
                                             break
 
-                                    # Queue OCR if track has no valid readable plate yet
+                                    # Queue OCR if track has no valid readable plate yet and crop is large enough
                                     has_clean_plate = bool(
                                         matched_track
                                         and matched_track.plate_number
@@ -218,7 +229,7 @@ class CameraStreamWorker:
                                         and not matched_track.plate_number.startswith("NO_PLATE")
                                     )
                                     if matched_track and not has_clean_plate:
-                                        if not self.ocr_queue.full():
+                                        if (py2 - py1) >= 12 and (px2 - px1) >= 25 and not self.ocr_queue.full():
                                             pad = 6
                                             crop = frame[max(0, py1 - pad):min(frame.shape[0], py2 + pad), max(0, px1 - pad):min(frame.shape[1], px2 + pad)].copy()
                                             if crop.size > 0:
@@ -307,8 +318,8 @@ class CameraStreamWorker:
                         with self.lock:
                             self.current_jpeg = buffer.tobytes()
 
-                    # Regulate frame rate (~25 FPS)
-                    time.sleep(0.038)
+                    # Regulate frame rate (~30 FPS playback)
+                    time.sleep(0.026)
             except Exception as e:
                 print(f"[STREAM-WORKER] Loop error for {self.camera_id}: {e}")
                 time.sleep(1.0)
@@ -340,13 +351,18 @@ def resolve_video_file(camera_id: str, requested_path: Optional[str]) -> str:
     if camera_id in ["CAM_002", "CAM_004"]:
         possible_paths.extend([
             os.path.join(frontend_videos_dir, "junction_traffic.mp4"),
-            os.path.join(data_videos_dir, "junction_traffic.mp4"),
             os.path.join(frontend_videos_dir, "gettyimages-465302231-640_adpp.mp4"),
+            os.path.join(frontend_videos_dir, "sample_traffic.mp4"),
+            os.path.join(frontend_videos_dir, "gettyimages-1191315794-640_adpp.mp4"),
+            os.path.join(data_videos_dir, "junction_traffic.mp4"),
+            os.path.join(data_videos_dir, "gettyimages-465302231-640_adpp.mp4"),
         ])
     else:
         possible_paths.extend([
             os.path.join(frontend_videos_dir, "sample_traffic.mp4"),
             os.path.join(frontend_videos_dir, "gettyimages-1191315794-640_adpp.mp4"),
+            os.path.join(frontend_videos_dir, "junction_traffic.mp4"),
+            os.path.join(frontend_videos_dir, "gettyimages-465302231-640_adpp.mp4"),
             os.path.join(data_videos_dir, "sample_traffic.mp4"),
             os.path.join(data_videos_dir, "gettyimages-1191315794-640_adpp.mp4"),
             os.path.join(data_videos_dir, "215258_medium.mp4"),

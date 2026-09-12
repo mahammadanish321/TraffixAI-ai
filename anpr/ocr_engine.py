@@ -113,8 +113,11 @@ class ANPREngine:
                         best_plate = combined_corrected
                         best_conf = max(avg_conf, 0.88 if combined_valid else avg_conf)
 
-            if best_plate and len(best_plate) >= 4 and best_conf >= 0.15:
-                return (best_plate, round(max(best_conf, 0.85 if found_valid_syntax else 0.75), 2))
+            if best_plate and len(best_plate) >= 5:
+                if found_valid_syntax:
+                    return (best_plate, round(max(best_conf, 0.90), 2))
+                elif best_conf >= 0.60:
+                    return (best_plate, round(best_conf, 2))
 
             return (None, None)
 
