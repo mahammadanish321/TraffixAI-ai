@@ -1,17 +1,11 @@
-# Optimized Tracker Configuration for Continuous Vehicle Tracking
+# Optimized ByteTrack Configuration for Continuous Vehicle Tracking
 # High-persistence settings to prevent ID breaks across motion blur & distance
 
-tracker_type: botsort
+tracker_type: bytetrack
 track_high_thresh: 0.25      # High-confidence first-stage matching threshold
-track_low_thresh: 0.10       # Low-confidence second-stage recovery threshold (keeps blurred cars alive)
+track_low_thresh: 0.05       # Low-confidence second-stage recovery threshold (keeps blurred cars alive)
 new_track_thresh: 0.35       # Minimum confidence to initialize a NEW vehicle track
-track_buffer: 60             # Keep lost tracks alive for 60 frames (~3-5 seconds) during occlusions
-match_thresh: 0.55           # IoU association threshold (lower = stickier matching for fast motion)
+track_buffer: 120            # Keep lost tracks alive for 120 frames (~4-5 seconds) during occlusions & flare
+match_thresh: 0.70           # Sticky IoU association threshold
 fuse_score: True             # Fuse detection confidence score with motion IoU
 
-# BoT-SORT specific motion parameters
-gmc_method: sparseOptFlow
-proximity_thresh: 0.5
-appearance_thresh: 0.75
-with_reid: False
-model: auto                  # Required by Ultralytics BoT-SORT encoder builder

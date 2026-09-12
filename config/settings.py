@@ -19,10 +19,10 @@ class Settings:
     # YOLO & Tracking Settings
     YOLO_MODEL: str = os.getenv("YOLO_MODEL", "yolov8n.pt")
     CONF_THRESHOLD: float = float(os.getenv("CONF_THRESHOLD", "0.20"))
-    TRACKER_CONFIG: str = os.getenv("TRACKER_CONFIG", "config/tracker.yaml")
+    TRACKER_CONFIG: str = os.getenv("TRACKER_CONFIG", os.path.join(os.path.dirname(__file__), "tracker.yaml"))
     MIN_HITS_TO_CONFIRM: int = int(os.getenv("MIN_HITS_TO_CONFIRM", "4"))
     MIN_BOX_AREA: int = int(os.getenv("MIN_BOX_AREA", "625"))  # 25x25 pixels
-    MAX_LOST_FRAMES: int = int(os.getenv("MAX_LOST_FRAMES", "20"))  # Tolerance for temporary occlusion before ENDED
+    MAX_LOST_FRAMES: int = int(os.getenv("MAX_LOST_FRAMES", "60"))  # Tolerance for temporary occlusion before ENDED
     
     # Re-ID Model Settings (Person 2)
     REID_MODEL_NAME: str = os.getenv("REID_MODEL_NAME", "mobilenet_v3_small")

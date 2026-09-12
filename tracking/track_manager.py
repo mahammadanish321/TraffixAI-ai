@@ -240,6 +240,7 @@ class TrackManager:
             record.plate_confidence = event.plate_confidence
             record.vehicle_embedding = event.vehicle_embedding
         else:
+            clean_p = record.plate_number if (record.plate_number and not record.plate_number.startswith("UNREADABLE") and not record.plate_number.startswith("TRACK_") and not record.plate_number.startswith("CAM_")) else None
             event = DetectionEvent(
                 camera_id=record.camera_id,
                 observed_at=record.last_seen,
@@ -247,7 +248,7 @@ class TrackManager:
                 vehicle_type=record.vehicle_type,
                 vehicle_confidence=record.peak_confidence,
                 bounding_box=record.bbox,
-                plate_number=record.plate_number or f"UNREADABLE_{record.local_track_id}",
+                plate_number=clean_p,
                 plate_confidence=record.plate_confidence or 0.0,
                 vehicle_embedding=record.vehicle_embedding or [],
                 embedding_model="mobilenet_v3_small",
