@@ -115,6 +115,8 @@ class CameraStreamWorker:
                 if plate_text and len(plate_text) >= 4 and track_ref:
                     track_ref.plate_number = plate_text
                     track_ref.plate_confidence = ocr_conf or 0.90
+                    tag = track_ref.local_track_id.split('_')[-1]
+                    print(f"\033[1;32m[AI-ANPR] 🎯 RECOGNIZED PLATE: [{plate_text}] (Conf: {int((ocr_conf or 0.90)*100)}%) on {track_ref.vehicle_type.upper()} #{tag} @ {self.camera_id}\033[0m", flush=True)
                     # Dispatch real-time update with recognized plate
                     from schemas.event import DetectionEvent
                     now_iso = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
@@ -155,7 +157,7 @@ class CameraStreamWorker:
         self.is_running = False
 
     def _run_loop(self):
-        print(f"[STREAM-WORKER] Starting video processing for {self.camera_id} ({self.video_path})...")
+        print(f"\033[1;36m[AI-VISION] 🎥 Processing live stream for {self.camera_id} from {self.video_path}\033[0m", flush=True)
         p_detector = get_plate_model()
         latest_plates = []
 
@@ -168,6 +170,11 @@ class CameraStreamWorker:
 
                     # 1. Update Tracker (Fast YOLO Tracking without blocking OCR)
                     active_tracks = self.tracker.update(frame, frame_num=frame_num, timestamp_sec=timestamp_sec)
+
+                    if frame_num % 35 == 0 and len(active_tracks) > 0:
+                        plates_list = [t.plate_number for t in active_tracks if t.plate_number and not t.plate_number.startswith("TRACK_") and not t.plate_number.startswith("NO_PLATE")]
+                        plates_str = f" | 🏷️ Plates: {', '.join(plates_list)}" if plates_list else ""
+                        print(f"\033[1;34m[AI-VISION]\033[0m 🚗 [{self.camera_id}] Tracking {len(active_tracks)} vehicles{plates_str} | Frame {frame_num}", flush=True)
 
                     # 2. Dispatch events to Backend via non-blocking queue
                     events = self.tracker.track_manager.get_dispatchable_events()
